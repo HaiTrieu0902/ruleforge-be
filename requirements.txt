@@ -1,0 +1,34 @@
+# FastAPI and server dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Document processing
+PyPDF2==3.0.1
+python-docx==1.1.0
+python-magic-bin==0.4.14  # Windows-specific file type detection
+
+# Machine Learning and NLP
+transformers==4.36.0
+torch==2.1.0
+tokenizers==0.15.0
+sentencepiece==0.1.99
+
+# AI APIs
+openai==1.3.0
+google-generativeai==0.3.2
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.7
+
+# HTTP client
+httpx==0.25.2
+aiohttp==3.9.0
+
+# Utilities
+python-dotenv==1.0.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
