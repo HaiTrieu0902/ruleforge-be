@@ -11,6 +11,7 @@ python-docx==1.1.0
 python-magic-bin==0.4.14  # Windows-specific file type detection
 
 # Machine Learning and NLP
+numpy<2.0.0  # Pin NumPy to 1.x to avoid compatibility issues
 transformers==4.36.0
 torch==2.1.0
 tokenizers==0.15.0

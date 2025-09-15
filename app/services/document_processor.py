@@ -1,7 +1,6 @@
 import PyPDF2
 from docx import Document as DocxDocument
 import os
-from typing import str
 
 class DocumentProcessor:
     """Service for extracting text from various document formats."""

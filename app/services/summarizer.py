@@ -1,6 +1,5 @@
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
-from typing import str
 from app.core.config import settings
 
 class ContractSummarizer:

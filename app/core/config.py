@@ -12,21 +12,21 @@ class Settings(BaseSettings):
     upload_folder: str = "uploads"
     allowed_extensions: List[str] = ["pdf", "docx", "txt"]
     
-    # Database settings
-    database_url: str = "postgresql://postgres:040202005173@localhost:5432/ruleforge"
+    # Database settings - these will be loaded from .env file
+    database_url: str
     
-    # Database connection settings
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_name: str = "ruleforge"
-    db_user: str = "postgres"
-    db_password: str = "040202005173"
+    # Database connection settings - these will be loaded from .env file
+    db_host: str
+    db_port: int
+    db_name: str
+    db_user: str
+    db_password: str
     
-    # OpenAI settings
+    # OpenAI settings - these will be loaded from .env file
     openai_api_key: str = ""
     openai_model: str = "gpt-3.5-turbo"
     
-    # Google Cloud AI settings
+    # Google Cloud AI settings - these will be loaded from .env file
     google_api_key: str = ""
     google_model: str = "gemini-pro"
     

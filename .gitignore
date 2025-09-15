@@ -64,3 +64,5 @@ htmlcov/
 models/
 *.bin
 *.safetensors
+
+uploads
