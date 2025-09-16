@@ -24,8 +24,17 @@ async def lifespan(app: FastAPI):
         print("❌ Database initialization failed - check PostgreSQL connection")
         # Don't exit, let the app start anyway for debugging
     
+    # Initialize MinIO storage
+    from app.services.minio_storage import minio_storage
+    if await minio_storage.initialize_bucket():
+        print("✅ MinIO storage initialized successfully")
+    else:
+        print("❌ MinIO storage initialization failed - check MinIO connection")
+    
     yield
-    # Shutdown (if needed)
+    # Shutdown
+    minio_storage.close()
+    # Note: ContractSummarizer cleanup is handled per-instance
 
 app = FastAPI(
     title="RuleForge Backend",

@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     upload_folder: str = "uploads"
     allowed_extensions: List[str] = ["pdf", "docx", "txt"]
     
+    # MinIO settings
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin123"
+    minio_bucket_name: str = "ruleforge"
+    minio_secure: bool = False  # Set to True for HTTPS
+    
     # Database settings - these will be loaded from .env file
     database_url: str
     
@@ -25,6 +32,10 @@ class Settings(BaseSettings):
     # OpenAI settings - these will be loaded from .env file
     openai_api_key: str = ""
     openai_model: str = "gpt-3.5-turbo"
+    
+    # Groq settings - these will be loaded from .env file
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-20b"
     
     # Google Cloud AI settings - these will be loaded from .env file
     google_api_key: str = ""

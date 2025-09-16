@@ -1,44 +1,41 @@
-import openai
-import google.generativeai as genai
+from groq import Groq
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 from typing import Dict, List, Any
 from app.core.config import settings
 
 class RuleGenerator:
-    """Service for generating business rules from contracts using AI APIs."""
+    """Service for generating business rules from contracts using Groq AI."""
     
     def __init__(self):
-        self.openai_client = None
-        self.google_model = None
-        self._initialize_clients()
+        self.client = None
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self._initialize_client()
     
-    def _initialize_clients(self):
-        """Initialize AI API clients."""
-        # Initialize OpenAI
-        if settings.openai_api_key:
-            try:
-                openai.api_key = settings.openai_api_key
-                self.openai_client = openai
-                print("✅ OpenAI client initialized")
-            except Exception as e:
-                print(f"❌ Error initializing OpenAI: {str(e)}")
-        
-        # Initialize Google Generative AI
-        if settings.google_api_key:
-            try:
-                genai.configure(api_key=settings.google_api_key)
-                self.google_model = genai.GenerativeModel(settings.google_model)
-                print("✅ Google AI client initialized")
-            except Exception as e:
-                print(f"❌ Error initializing Google AI: {str(e)}")
-    
-    async def generate_rules(self, text: str, document_type: str = "contract", provider: str = "openai") -> Dict[str, Any]:
-        """Generate business rules from document text."""
+    def _initialize_client(self):
+        """Initialize Groq AI client."""
         try:
-            if provider == "openai" and self.openai_client:
-                return await self._generate_rules_openai(text, document_type)
-            elif provider == "google" and self.google_model:
-                return await self._generate_rules_google(text, document_type)
+            print(f"🔧 Initializing Groq client for rule generation...")
+            print(f"🔑 API Key configured: {'Yes' if settings.groq_api_key and len(settings.groq_api_key) > 10 else 'No'}")
+            print(f"🤖 Model: {settings.groq_model}")
+            
+            if not settings.groq_api_key:
+                raise Exception("Groq API key not configured. Please set GROQ_API_KEY in your .env file")
+            
+            self.client = Groq(api_key=settings.groq_api_key)
+            self.model = settings.groq_model
+            print(f"✅ Groq client initialized successfully for rule generation")
+            
+        except Exception as e:
+            print(f"❌ Failed to initialize Groq client: {str(e)}")
+            raise
+    
+    async def generate_rules(self, text: str, document_type: str = "contract") -> Dict[str, Any]:
+        """Generate business rules from document text using Groq AI."""
+        try:
+            if self.client:
+                return await self._generate_rules_groq(text, document_type)
             else:
                 # Fallback to simple pattern-based rule extraction
                 return await self._generate_rules_fallback(text, document_type)
@@ -47,84 +44,164 @@ class RuleGenerator:
             print(f"Error generating rules: {str(e)}")
             return await self._generate_rules_fallback(text, document_type)
     
-    async def _generate_rules_openai(self, text: str, document_type: str) -> Dict[str, Any]:
-        """Generate rules using OpenAI GPT."""
-        prompt = self._create_rule_extraction_prompt(text, document_type)
+    def _detect_language_instruction(self, text: str) -> str:
+        """Detect the language of the text and provide appropriate instruction."""
+        # Common Vietnamese words and patterns
+        vietnamese_indicators = [
+            'và', 'của', 'là', 'có', 'được', 'cho', 'từ', 'trong', 'với', 'các', 
+            'này', 'đó', 'để', 'những', 'một', 'về', 'theo', 'như', 'đã', 'sẽ',
+            'tại', 'do', 'khi', 'mà', 'nếu', 'hoặc', 'nhưng', 'vì', 'bởi', 'thì',
+            'ở', 'trên', 'dưới', 'giữa', 'sau', 'trước', 'ngoài', 'trong'
+        ]
         
+        # Convert to lowercase for comparison
+        text_lower = text.lower()
+        
+        # Count Vietnamese indicators
+        vietnamese_count = sum(1 for word in vietnamese_indicators if f' {word} ' in text_lower or text_lower.startswith(f'{word} ') or text_lower.endswith(f' {word}'))
+        
+        # Check for Vietnamese specific characters
+        vietnamese_chars = ['ă', 'â', 'đ', 'ê', 'ô', 'ơ', 'ư', 'á', 'à', 'ả', 'ã', 'ạ', 'é', 'è', 'ẻ', 'ẽ', 'ẹ', 'í', 'ì', 'ỉ', 'ĩ', 'ị', 'ó', 'ò', 'ỏ', 'õ', 'ọ', 'ú', 'ù', 'ủ', 'ũ', 'ụ', 'ý', 'ỳ', 'ỷ', 'ỹ', 'ỵ']
+        has_vietnamese_chars = any(char in text_lower for char in vietnamese_chars)
+        
+        print(f"🔍 Language detection for rules - Vietnamese words: {vietnamese_count}, Vietnamese chars: {has_vietnamese_chars}")
+        
+        # Determine language based on indicators
+        if vietnamese_count > 3 or has_vietnamese_chars:
+            return "IMPORTANT: Please respond in Vietnamese language (tiếng Việt). The document is in Vietnamese, so all rules and explanations must be in Vietnamese."
+        else:
+            return "Please respond in English."
+
+    async def _generate_rules_groq(self, text: str, document_type: str) -> Dict[str, Any]:
+        """Generate rules using Groq AI."""
         try:
-            response = await self.openai_client.ChatCompletion.acreate(
-                model=settings.openai_model,
-                messages=[
-                    {"role": "system", "content": "You are an expert legal document analyzer specializing in extracting business rules and key terms from contracts and policies."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1500,
-                temperature=0.3
+            # Detect language and create appropriate prompt
+            language_instruction = self._detect_language_instruction(text)
+            prompt = self._create_rule_extraction_prompt(text, document_type, language_instruction)
+            
+            print(f"🔄 Sending rule extraction request to Groq API with model: {self.model}")
+            print(f"📝 Text length: {len(text)} characters")
+            
+            # Use thread executor to make the blocking call async
+            completion = await asyncio.get_event_loop().run_in_executor(
+                self.executor,
+                lambda: self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "You are an expert legal document analyzer specializing in extracting business rules and key terms from contracts and policies. You can work with documents in both Vietnamese and English languages."
+                        },
+                        {
+                            "role": "user", 
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.3,
+                    max_tokens=2048,
+                    top_p=1,
+                    stream=False,
+                    stop=None
+                )
             )
             
-            content = response.choices[0].message.content
-            return self._parse_ai_response(content, "openai")
+            print(f"✅ Received rule extraction response from Groq API")
             
+            if completion and hasattr(completion, 'choices') and completion.choices and len(completion.choices) > 0:
+                if hasattr(completion.choices[0], 'message') and hasattr(completion.choices[0].message, 'content'):
+                    content = completion.choices[0].message.content
+                    if content:
+                        content = content.strip()
+                        print(f"✅ Rules generated: {len(content)} characters")
+                        return self._parse_ai_response(content, "groq")
+                    else:
+                        print("❌ Rule extraction content is empty")
+                        return await self._generate_rules_fallback(text, document_type)
+                else:
+                    print("❌ Invalid response structure from Groq API")
+                    return await self._generate_rules_fallback(text, document_type)
+            else:
+                print("❌ No choices returned from Groq API")
+                return await self._generate_rules_fallback(text, document_type)
+                
         except Exception as e:
-            print(f"OpenAI API error: {str(e)}")
-            raise e
+            print(f"❌ Error in Groq API call for rule generation: {str(e)}")
+            print(f"❌ Error type: {type(e).__name__}")
+            return await self._generate_rules_fallback(text, document_type)
     
-    async def _generate_rules_google(self, text: str, document_type: str) -> Dict[str, Any]:
-        """Generate rules using Google Gemini."""
-        prompt = self._create_rule_extraction_prompt(text, document_type)
-        
-        try:
-            response = self.google_model.generate_content(prompt)
-            content = response.text
-            return self._parse_ai_response(content, "google")
-            
-        except Exception as e:
-            print(f"Google AI API error: {str(e)}")
-            raise e
-    
-    def _create_rule_extraction_prompt(self, text: str, document_type: str) -> str:
+    def _create_rule_extraction_prompt(self, text: str, document_type: str, language_instruction: str) -> str:
         """Create a prompt for rule extraction."""
         base_prompt = f"""
-        Analyze the following {document_type} and extract business rules in JSON format.
+        Analyze the following {document_type} and extract business rules in a structured conditional format.
+        {language_instruction}
 
-        Extract the following information:
-        1. Key Obligations - What each party must do
-        2. Restrictions - What each party cannot do  
-        3. Conditions - When certain rules apply
-        4. Deadlines - Time-based requirements
-        5. Financial Terms - Payment, fees, penalties
-        6. Termination Rules - How the agreement can end
-        7. Key Definitions - Important terms defined
+        Create business rules using this structured format:
+        
+        <if> CONDITION
+            <and> ADDITIONAL_CONDITION
+            <or> ALTERNATIVE_CONDITION
+            <thn> ACTION_TO_TAKE
+        <elif> DIFFERENT_CONDITION
+            <thn> DIFFERENT_ACTION
+        <else>
+            <thn> DEFAULT_ACTION
+
+        Example format:
+        <if> APPLICANT_AGE > 18
+            <and> WORK_EXPERIENCE > 12
+            <and> LOAN_END_DATE > RETIREMENT_DATE
+                <if> EARLY_RETIREMENT = True
+                    <and> INCOME_VERIFIED = 1
+                    <thn> INCOME_RECORD = INCOME_RECORD * REFERENCE_SALARY
+                <elif> EARLY_RETIREMENT = False
+                    <if> INSURANCE_PROOF = True
+                        <and> INSURANCE_DURATION >= 3
+                        <thn> INCOME_RECORD = SALARY_RECORD * INSURANCE_SALARY
+                    <else>
+                        <thn> INCOME_RECORD = 0
+
+        Extract and convert contract terms into this format. Focus on:
+        1. Eligibility conditions (age, experience, qualifications)
+        2. Payment conditions (amounts, timing, methods)
+        3. Approval/rejection logic
+        4. Penalty calculations
+        5. Termination conditions
+        6. Compliance requirements
 
         Return the response in this JSON structure:
         {{
-            "obligations": [
-                {{"party": "Party Name", "obligation": "Description", "section": "Section reference if available"}}
+            "business_rules": [
+                {{
+                    "rule_id": "RULE_001",
+                    "rule_name": "Descriptive name",
+                    "rule_logic": "Complete rule in structured format",
+                    "category": "eligibility/payment/approval/penalty/termination/compliance",
+                    "variables_used": ["VAR1", "VAR2", "VAR3"],
+                    "description": "What this rule does"
+                }}
             ],
-            "restrictions": [
-                {{"party": "Party Name", "restriction": "Description", "section": "Section reference if available"}}
+            "variables": [
+                {{
+                    "variable_name": "VARIABLE_NAME",
+                    "data_type": "number/string/boolean/date",
+                    "description": "What this variable represents",
+                    "possible_values": ["value1", "value2"] 
+                }}
             ],
-            "conditions": [
-                {{"condition": "If/when condition", "consequence": "Then this happens", "section": "Section reference if available"}}
-            ],
-            "deadlines": [
-                {{"description": "Deadline description", "timeframe": "Time period", "section": "Section reference if available"}}
-            ],
-            "financial_terms": [
-                {{"type": "payment/fee/penalty", "amount": "Amount if specified", "description": "Description", "section": "Section reference if available"}}
-            ],
-            "termination_rules": [
-                {{"trigger": "What triggers termination", "notice_period": "Required notice", "section": "Section reference if available"}}
-            ],
-            "key_definitions": [
-                {{"term": "Term", "definition": "Definition", "section": "Section reference if available"}}
+            "constants": [
+                {{
+                    "constant_name": "CONSTANT_NAME",
+                    "value": "actual_value",
+                    "description": "What this constant represents"
+                }}
             ]
         }}
 
         Document text:
-        {text[:3000]}  # Limit text to avoid token limits
+        {text[:4000]}
         
         Please provide only the JSON response without additional commentary.
+        Convert all contract conditions into structured business rules using the <if><and><or><thn><elif><else> format.
         """
         
         return base_prompt
@@ -140,14 +217,27 @@ class RuleGenerator:
                 json_str = content[start_idx:end_idx]
                 parsed_rules = json.loads(json_str)
                 
-                # Validate structure
-                expected_keys = ['obligations', 'restrictions', 'conditions', 'deadlines', 'financial_terms', 'termination_rules', 'key_definitions']
+                # Validate new structure
+                expected_keys = ['business_rules', 'variables', 'constants']
                 for key in expected_keys:
                     if key not in parsed_rules:
                         parsed_rules[key] = []
                 
+                # Ensure business_rules have required fields
+                if parsed_rules.get('business_rules'):
+                    for rule in parsed_rules['business_rules']:
+                        if 'rule_id' not in rule:
+                            rule['rule_id'] = f"RULE_{len(parsed_rules['business_rules'])}"
+                        if 'rule_name' not in rule:
+                            rule['rule_name'] = "Generated Rule"
+                        if 'category' not in rule:
+                            rule['category'] = "general"
+                        if 'variables_used' not in rule:
+                            rule['variables_used'] = []
+                
                 parsed_rules['provider'] = provider
                 parsed_rules['extraction_method'] = 'ai_generated'
+                parsed_rules['rule_format'] = 'structured_conditional'
                 return parsed_rules
             else:
                 raise ValueError("No valid JSON found in response")
@@ -156,15 +246,12 @@ class RuleGenerator:
             print(f"Error parsing AI response: {str(e)}")
             # Return a basic structure with the raw content
             return {
-                "obligations": [],
-                "restrictions": [],
-                "conditions": [],
-                "deadlines": [],
-                "financial_terms": [],
-                "termination_rules": [],
-                "key_definitions": [],
+                "business_rules": [],
+                "variables": [],
+                "constants": [],
                 "provider": provider,
                 "extraction_method": "ai_generated",
+                "rule_format": "structured_conditional",
                 "raw_response": content[:1000],  # Store truncated raw response
                 "error": f"Failed to parse response: {str(e)}"
             }
@@ -172,26 +259,24 @@ class RuleGenerator:
     async def _generate_rules_fallback(self, text: str, document_type: str) -> Dict[str, Any]:
         """Fallback rule extraction using pattern matching."""
         rules = {
-            "obligations": [],
-            "restrictions": [],
-            "conditions": [],
-            "deadlines": [],
-            "financial_terms": [],
-            "termination_rules": [],
-            "key_definitions": [],
+            "business_rules": [],
+            "variables": [],
+            "constants": [],
             "provider": "pattern_matching",
-            "extraction_method": "fallback"
+            "extraction_method": "fallback",
+            "rule_format": "structured_conditional"
         }
         
         text_lower = text.lower()
         sentences = text.split('.')
+        rule_counter = 1
         
         # Simple pattern matching for different rule types
         obligation_patterns = ['shall', 'must', 'required to', 'agrees to', 'undertakes to']
         restriction_patterns = ['shall not', 'may not', 'prohibited', 'forbidden', 'cannot']
         condition_patterns = ['if', 'when', 'unless', 'provided that', 'in the event']
         deadline_patterns = ['within', 'by', 'no later than', 'before', 'after']
-        financial_patterns = ['pay', 'payment', 'fee', 'cost', 'price', '$', 'dollar']
+        financial_patterns = ['pay', 'payment', 'fee', 'cost', 'price', '$', 'dollar', 'vnd', 'đồng']
         termination_patterns = ['terminate', 'termination', 'end', 'expire', 'cancel']
         
         for sentence in sentences:
@@ -201,58 +286,87 @@ class RuleGenerator:
                 
             sentence_lower = sentence.lower()
             
-            # Check for obligations
+            # Check for obligations and convert to structured format
             if any(pattern in sentence_lower for pattern in obligation_patterns):
-                rules['obligations'].append({
-                    "party": "To be determined",
-                    "obligation": sentence,
-                    "section": "Pattern matched"
+                rule_logic = f"<if> PARTY_TYPE = 'OBLIGATED'\n    <thn> ACTION_REQUIRED = '{sentence}'"
+                rules['business_rules'].append({
+                    "rule_id": f"RULE_{rule_counter:03d}",
+                    "rule_name": f"Obligation Rule {rule_counter}",
+                    "rule_logic": rule_logic,
+                    "category": "obligation",
+                    "variables_used": ["PARTY_TYPE", "ACTION_REQUIRED"],
+                    "description": f"Obligation requirement: {sentence[:100]}..."
                 })
+                rule_counter += 1
             
             # Check for restrictions
             if any(pattern in sentence_lower for pattern in restriction_patterns):
-                rules['restrictions'].append({
-                    "party": "To be determined", 
-                    "restriction": sentence,
-                    "section": "Pattern matched"
+                rule_logic = f"<if> PARTY_TYPE = 'RESTRICTED'\n    <thn> ACTION_FORBIDDEN = '{sentence}'"
+                rules['business_rules'].append({
+                    "rule_id": f"RULE_{rule_counter:03d}",
+                    "rule_name": f"Restriction Rule {rule_counter}",
+                    "rule_logic": rule_logic,
+                    "category": "restriction",
+                    "variables_used": ["PARTY_TYPE", "ACTION_FORBIDDEN"],
+                    "description": f"Restriction requirement: {sentence[:100]}..."
                 })
+                rule_counter += 1
             
             # Check for conditions
             if any(pattern in sentence_lower for pattern in condition_patterns):
-                rules['conditions'].append({
-                    "condition": sentence,
-                    "consequence": "To be determined",
-                    "section": "Pattern matched"
+                rule_logic = f"<if> CONDITION_MET = True\n    <thn> CONSEQUENCE = '{sentence}'"
+                rules['business_rules'].append({
+                    "rule_id": f"RULE_{rule_counter:03d}",
+                    "rule_name": f"Conditional Rule {rule_counter}",
+                    "rule_logic": rule_logic,
+                    "category": "condition",
+                    "variables_used": ["CONDITION_MET", "CONSEQUENCE"],
+                    "description": f"Conditional requirement: {sentence[:100]}..."
                 })
-            
-            # Check for deadlines
-            if any(pattern in sentence_lower for pattern in deadline_patterns):
-                rules['deadlines'].append({
-                    "description": sentence,
-                    "timeframe": "To be determined",
-                    "section": "Pattern matched"
-                })
+                rule_counter += 1
             
             # Check for financial terms
             if any(pattern in sentence_lower for pattern in financial_patterns):
-                rules['financial_terms'].append({
-                    "type": "To be determined",
-                    "amount": "To be determined",
-                    "description": sentence,
-                    "section": "Pattern matched"
+                rule_logic = f"<if> PAYMENT_DUE = True\n    <thn> AMOUNT_CALCULATION = '{sentence}'"
+                rules['business_rules'].append({
+                    "rule_id": f"RULE_{rule_counter:03d}",
+                    "rule_name": f"Financial Rule {rule_counter}",
+                    "rule_logic": rule_logic,
+                    "category": "payment",
+                    "variables_used": ["PAYMENT_DUE", "AMOUNT_CALCULATION"],
+                    "description": f"Financial requirement: {sentence[:100]}..."
                 })
-            
-            # Check for termination rules
-            if any(pattern in sentence_lower for pattern in termination_patterns):
-                rules['termination_rules'].append({
-                    "trigger": sentence,
-                    "notice_period": "To be determined",
-                    "section": "Pattern matched"
-                })
+                rule_counter += 1
+        
+        # Add some common variables
+        rules['variables'] = [
+            {
+                "variable_name": "PARTY_TYPE",
+                "data_type": "string",
+                "description": "Type of party in the contract",
+                "possible_values": ["BUYER", "SELLER", "OBLIGATED", "RESTRICTED"]
+            },
+            {
+                "variable_name": "CONDITION_MET",
+                "data_type": "boolean",
+                "description": "Whether a specific condition is satisfied",
+                "possible_values": ["True", "False"]
+            },
+            {
+                "variable_name": "PAYMENT_DUE",
+                "data_type": "boolean",
+                "description": "Whether payment is required",
+                "possible_values": ["True", "False"]
+            }
+        ]
         
         # Limit results to avoid overwhelming output
-        for key in rules:
-            if isinstance(rules[key], list) and len(rules[key]) > 5:
-                rules[key] = rules[key][:5]
+        if len(rules['business_rules']) > 10:
+            rules['business_rules'] = rules['business_rules'][:10]
         
         return rules
+    
+    def close(self):
+        """Clean up resources."""
+        if self.executor:
+            self.executor.shutdown(wait=True)
