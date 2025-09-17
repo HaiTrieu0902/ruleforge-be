@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # Hugging Face model settings
     hf_model_summarization: str = "facebook/bart-large-cnn"
     hf_model_text_generation: str = "microsoft/DialoGPT-medium"
+    
+    # Qdrant settings - these will be loaded from .env file
+    qdrant_api_key: str = ""
+    qdrant_url: str = "https://66ce694c-f174-4791-b984-2b6f6744e523.europe-west3-0.gcp.cloud.qdrant.io:6333"
+    qdrant_collection_name: str = "ruleforge_documents" 
 
     class Config:
         env_file = ".env"

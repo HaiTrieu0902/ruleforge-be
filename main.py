@@ -6,7 +6,7 @@ import uvicorn
 import os
 
 from app.core.config import settings
-from app.api import documents, health
+from app.api import documents, health, variables
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,10 +16,14 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.upload_folder, exist_ok=True)
     print(f"✅ Upload folder created: {settings.upload_folder}")
     
-    # Initialize database
-    from app.models.database import init_db
+    # Initialize database and create tables
+    from app.models.database import init_db, engine, Base
     if init_db():
         print("✅ Database initialized successfully")
+        
+        # Create all tables including the new variables table
+        Base.metadata.create_all(bind=engine)
+        print("✅ All database tables created/updated successfully")
     else:
         print("❌ Database initialization failed - check PostgreSQL connection")
         # Don't exit, let the app start anyway for debugging
@@ -30,6 +34,14 @@ async def lifespan(app: FastAPI):
         print("✅ MinIO storage initialized successfully")
     else:
         print("❌ MinIO storage initialization failed - check MinIO connection")
+    
+    # Auto-sync variables to Qdrant
+    from app.services.qdrant_service import qdrant_service
+    sync_result = await qdrant_service.sync_variables_from_database()
+    if sync_result["success"]:
+        print(f"✅ Variables sync completed: {sync_result['message']}")
+    else:
+        print(f"⚠️ Variables sync failed: {sync_result['message']}")
     
     yield
     # Shutdown
@@ -57,6 +69,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
+app.include_router(variables.router, prefix="/api/v1", tags=["variables"])
 
 if __name__ == "__main__":
     uvicorn.run(

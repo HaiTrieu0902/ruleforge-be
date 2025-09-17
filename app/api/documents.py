@@ -10,6 +10,7 @@ from app.services.document_processor import DocumentProcessor
 from app.services.summarizer import ContractSummarizer
 from app.services.rule_generator import RuleGenerator
 from app.services.minio_storage import minio_storage
+from app.services.qdrant_service import qdrant_service
 from app.models.database import get_db, Document, Summary, Rule
 from app.utils.file_validator import validate_file
 
@@ -85,6 +86,18 @@ async def upload_document(
         )
         db.add(document)
         db.commit()
+        
+        # Add document to Qdrant for semantic search
+        await qdrant_service.add_document(
+            document_id=file_id,
+            text=extracted_text,
+            metadata={
+                "filename": file.filename,
+                "document_type": document_type,
+                "file_size": upload_result["file_size"],
+                "type": "document"
+            }
+        )
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
